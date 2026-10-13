@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: © 2022-2025 Peter Lemenkov
+# SPDX-FileCopyrightText: © 2023-2025 dependabot[bot]
+#
+# SPDX-License-Identifier: CC0-1.0
+
+name: Coverity scan
+
+# We only want to test official release code, not every pull request.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/*.c'
+      - 'src/*.h'
+      - '.github/workflows/coverity.yml'
+
+jobs:
+  coverity:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v7
+    - run: sudo apt update
+    - run: sudo apt install -y libgraphicsmagick1-dev libpng-dev libexiv2-dev libtiff-dev libjpeg-dev libxml2-dev libbz2-dev libfreetype6-dev libpstoedit-dev autoconf automake libtool gettext autopoint
+    - run: ./autogen.sh
+    - run: ./configure
+    - uses: vapier/coverity-scan-action@v1
+      with:
+        email: ${{ secrets.COVERITY_SCAN_EMAIL }}
+        token: ${{ secrets.COVERITY_SCAN_TOKEN }}

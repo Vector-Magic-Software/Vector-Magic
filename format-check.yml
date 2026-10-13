@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: © 2025 Peter Lemenkov
+#
+# SPDX-License-Identifier: CC0-1.0
+
+name: Format Check with clang-format
+
+on:
+  pull_request:
+    paths:
+      - 'src/*.c'
+      - 'src/*.h'
+      - '.github/workflows/format-check.yml'
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install clang-format
+        run: sudo apt-get install -y clang-format-20
+      - name: Check formatting
+        run: |
+          clang-format-20 --dry-run --Werror src/*.[ch]

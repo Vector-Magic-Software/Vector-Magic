@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: © 2022-2025 Peter Lemenkov
+# SPDX-FileCopyrightText: © 2023-2025 dependabot[bot]
+#
+# SPDX-License-Identifier: CC0-1.0
+
+name: Testing on Mac OS X
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/*.c'
+      - 'src/*.h'
+      - 'configure.ac'
+      - 'Makefile.am'
+      - '**/Makefile.am'
+      - 'autogen.sh'
+      - 'tests/**'
+  pull_request:
+    paths:
+      # Source code
+      - 'src/*.c'
+      - 'src/*.h'
+      # Build system
+      - 'configure.ac'
+      - 'Makefile.am'
+      - '**/Makefile.am'
+      - 'autogen.sh'
+      - 'tests/**'
+      # Dependencies
+      - '.github/workflows/macosx_test.yml'  # Re-run if workflow changes
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build_with_graphicsmagick:
+    runs-on: macOS-latest
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v7
+      # Runs a single command using the runners shell
+      - name: build and run tests packages with all featured readers
+        run: |
+            brew update
+            brew install graphicsmagick pstoedit libpng gettext glib libtool autoconf automake pkg-config
+            # libltdl is needed by GraphicsMagick but not in default linker search path on macOS
+            export LDFLAGS="-L$HOMEBREW_PREFIX/opt/libtool/lib $LDFLAGS"
+            ./autogen.sh
+            ./configure
+            make
+            make check
+        shell: bash

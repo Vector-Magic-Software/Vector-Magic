@@ -1,0 +1,643 @@
+/*
+ * Copyright (C) 1999, 2000, 2001 Dietmar Kovar
+ * SPDX-FileCopyrightText: © 2000-2003 Martin Weber
+ * SPDX-FileCopyrightText: © 2001 Per Grahn
+ * SPDX-FileCopyrightText: © 2001 Steffen Politzky
+ * SPDX-FileCopyrightText: © 2001-2003 Masatake YAMATO
+ * SPDX-FileCopyrightText: © 2017-2025 Peter Lemenkov
+ *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+
+/* mail comments and suggestions to kovar@t-online.de */
+
+#include "spline.h"
+#include "color.h"
+#include "output-dxf.h"
+#include <glib.h>
+#include "autotrace.h"
+#include <math.h>
+#include <string.h>
+
+/* Output macros.  */
+
+/* This should be used for outputting a string S on a line by itself.  */
+#define OUT_LINE(s) fprintf(dxf_file, "%s\n", s)
+
+/* These output their arguments, preceded by the indentation.  */
+#define OUT(s, ...) fprintf(dxf_file, s, __VA_ARGS__)
+
+/**************************************************************************************
+Definitions for spline to line transformation
+**************************************************************************************/
+
+#define RESOLUTION 10000 /* asume no pixels bigger than 1000000.0 */
+
+typedef struct xypnt_t {
+  int xp, yp;
+} xypnt;
+
+typedef struct Colors_t {
+  int red, green, blue;
+} Colors;
+
+/* RGB to layer transformation table follows */
+
+#define MAX_COLORS 255
+
+static const Colors dxftable[MAX_COLORS] = {
+    /*   1 */ {255, 0, 0},
+    /*   2 */ {255, 255, 0},
+    /*   3 */ {0, 255, 0},
+    /*   4 */ {0, 255, 255},
+    /*   5 */ {0, 0, 255},
+    /*   6 */ {255, 0, 255},
+    /*   7 */ {255, 255, 255},
+    /*   8 */ {255, 255, 255},
+    /*   9 */ {255, 255, 255},
+    /*  10 */ {255, 9, 0},
+    /*  11 */ {255, 128, 128},
+    /*  12 */ {166, 0, 0},
+    /*  13 */ {166, 83, 83},
+    /*  14 */ {128, 0, 0},
+    /*  15 */ {128, 64, 64},
+    /*  16 */ {77, 0, 0},
+    /*  17 */ {77, 38, 38},
+    /*  18 */ {38, 0, 0},
+    /*  19 */ {38, 19, 19},
+    /*  20 */ {255, 64, 0},
+    /*  21 */ {255, 160, 128},
+    /*  22 */ {166, 42, 0},
+    /*  23 */ {166, 104, 83},
+    /*  24 */ {128, 32, 0},
+    /*  25 */ {128, 80, 64},
+    /*  26 */ {77, 19, 0},
+    /*  27 */ {77, 48, 38},
+    /*  28 */ {38, 10, 0},
+    /*  29 */ {38, 24, 19},
+    /*  30 */ {256, 128, 0},
+    /*  31 */ {256, 192, 0},
+    /*  32 */ {166, 83, 0},
+    /*  33 */ {166, 125, 83},
+    /*  34 */ {128, 64, 0},
+    /*  35 */ {128, 96, 64},
+    /*  36 */ {77, 38, 0},
+    /*  37 */ {77, 58, 38},
+    /*  38 */ {38, 19, 0},
+    /*  39 */ {38, 29, 19},
+    /*  40 */ {255, 192, 0},
+    /*  41 */ {255, 224, 128},
+    /*  42 */ {166, 125, 0},
+    /*  43 */ {166, 146, 83},
+    /*  44 */ {128, 96, 0},
+    /*  45 */ {128, 112, 64},
+    /*  46 */ {77, 58, 0},
+    /*  47 */ {77, 67, 38},
+    /*  48 */ {38, 29, 0},
+    /*  49 */ {38, 34, 19},
+    /*  50 */ {255, 255, 0},
+    /*  51 */ {255, 255, 128},
+    /*  52 */ {166, 166, 0},
+    /*  53 */ {166, 166, 83},
+    /*  54 */ {128, 128, 0},
+    /*  55 */ {128, 128, 64},
+    /*  56 */ {77, 77, 0},
+    /*  57 */ {77, 77, 38},
+    /*  58 */ {38, 38, 0},
+    /*  59 */ {38, 38, 19},
+    /*  60 */ {192, 255, 0},
+    /*  61 */ {224, 255, 128},
+    /*  62 */ {125, 166, 0},
+    /*  63 */ {146, 166, 83},
+    /*  64 */ {96, 128, 0},
+    /*  65 */ {112, 128, 64},
+    /*  66 */ {58, 77, 0},
+    /*  67 */ {67, 77, 38},
+    /*  68 */ {29, 38, 0},
+    /*  69 */ {34, 38, 19},
+    /*  70 */ {128, 255, 0},
+    /*  71 */ {192, 255, 128},
+    /*  72 */ {83, 166, 0},
+    /*  73 */ {125, 166, 83},
+    /*  74 */ {64, 128, 0},
+    /*  75 */ {96, 128, 64},
+    /*  76 */ {38, 77, 0},
+    /*  77 */ {58, 77, 38},
+    /*  78 */ {19, 38, 0},
+    /*  79 */ {29, 38, 19},
+    /*  80 */ {64, 255, 0},
+    /*  81 */ {160, 255, 128},
+    /*  82 */ {42, 160, 0},
+    /*  83 */ {104, 160, 80},
+    /*  84 */ {32, 128, 0},
+    /*  85 */ {80, 128, 64},
+    /*  86 */ {19, 77, 0},
+    /*  87 */ {48, 77, 38},
+    /*  88 */ {10, 38, 0},
+    /*  89 */ {24, 38, 19},
+    /*  90 */ {0, 255, 0},
+    /*  91 */ {128, 255, 128},
+    /*  92 */ {0, 166, 0},
+    /*  93 */ {83, 166, 83},
+    /*  94 */ {0, 128, 0},
+    /*  95 */ {64, 128, 64},
+    /*  96 */ {0, 77, 0},
+    /*  97 */ {38, 77, 38},
+    /*  98 */ {0, 38, 0},
+    /*  99 */ {19, 38, 19},
+    /* 100 */ {0, 255, 64},
+    /* 101 */ {128, 255, 160},
+    /* 102 */ {0, 166, 42},
+    /* 103 */ {83, 166, 118},
+    /* 104 */ {0, 128, 32},
+    /* 105 */ {64, 128, 80},
+    /* 106 */ {0, 77, 19},
+    /* 107 */ {38, 77, 48},
+    /* 108 */ {0, 38, 10},
+    /* 109 */ {19, 38, 24},
+    /* 110 */ {0, 255, 128},
+    /* 111 */ {128, 255, 192},
+    /* 112 */ {0, 166, 83},
+    /* 113 */ {83, 166, 125},
+    /* 114 */ {0, 128, 64},
+    /* 115 */ {64, 128, 96},
+    /* 116 */ {0, 77, 38},
+    /* 117 */ {38, 77, 58},
+    /* 118 */ {0, 38, 19},
+    /* 119 */ {19, 38, 29},
+    /* 120 */ {0, 255, 192},
+    /* 121 */ {128, 255, 224},
+    /* 122 */ {0, 166, 125},
+    /* 123 */ {83, 166, 146},
+    /* 124 */ {0, 128, 96},
+    /* 125 */ {64, 128, 112},
+    /* 125 */ {0, 77, 58},
+    /* 127 */ {38, 77, 67},
+    /* 128 */ {0, 38, 29},
+    /* 129 */ {19, 38, 34},
+    /* 130 */ {0, 255, 255},
+    /* 131 */ {128, 255, 255},
+    /* 132 */ {0, 166, 166},
+    /* 133 */ {83, 166, 166},
+    /* 134 */ {0, 128, 128},
+    /* 135 */ {64, 128, 128},
+    /* 136 */ {0, 77, 77},
+    /* 137 */ {38, 77, 77},
+    /* 138 */ {0, 38, 38},
+    /* 139 */ {19, 38, 38},
+    /* 140 */ {0, 192, 255},
+    /* 141 */ {128, 224, 255},
+    /* 142 */ {0, 125, 166},
+    /* 143 */ {83, 146, 166},
+    /* 144 */ {0, 96, 128},
+    /* 145 */ {64, 112, 128},
+    /* 146 */ {0, 58, 77},
+    /* 147 */ {38, 67, 77},
+    /* 148 */ {0, 29, 38},
+    /* 149 */ {19, 34, 38},
+    /* 150 */ {0, 128, 255},
+    /* 151 */ {128, 192, 255},
+    /* 152 */ {0, 83, 166},
+    /* 153 */ {83, 125, 166},
+    /* 154 */ {0, 64, 128},
+    /* 155 */ {64, 96, 128},
+    /* 156 */ {0, 38, 77},
+    /* 157 */ {38, 58, 77},
+    /* 158 */ {0, 19, 38},
+    /* 159 */ {19, 29, 38},
+    /* 160 */ {0, 64, 255},
+    /* 161 */ {128, 160, 255},
+    /* 162 */ {0, 42, 166},
+    /* 163 */ {83, 104, 166},
+    /* 164 */ {0, 32, 128},
+    /* 165 */ {64, 80, 128},
+    /* 166 */ {0, 19, 77},
+    /* 167 */ {38, 48, 77},
+    /* 168 */ {0, 10, 38},
+    /* 169 */ {19, 24, 38},
+    /* 170 */ {0, 0, 255},
+    /* 171 */ {128, 128, 255},
+    /* 172 */ {0, 0, 166},
+    /* 173 */ {83, 83, 166},
+    /* 174 */ {0, 0, 128},
+    /* 175 */ {64, 64, 128},
+    /* 176 */ {0, 0, 77},
+    /* 177 */ {38, 38, 77},
+    /* 178 */ {0, 0, 38},
+    /* 179 */ {19, 19, 38},
+    /* 180 */ {64, 0, 255},
+    /* 181 */ {160, 128, 255},
+    /* 182 */ {42, 0, 166},
+    /* 183 */ {104, 83, 166},
+    /* 184 */ {32, 0, 128},
+    /* 185 */ {80, 64, 128},
+    /* 186 */ {19, 0, 77},
+    /* 187 */ {48, 38, 77},
+    /* 188 */ {10, 0, 38},
+    /* 189 */ {24, 19, 38},
+    /* 190 */ {128, 0, 255},
+    /* 191 */ {192, 128, 255},
+    /* 192 */ {83, 0, 166},
+    /* 193 */ {125, 83, 166},
+    /* 194 */ {64, 0, 128},
+    /* 195 */ {96, 64, 128},
+    /* 196 */ {38, 0, 77},
+    /* 197 */ {58, 38, 77},
+    /* 198 */ {19, 0, 38},
+    /* 199 */ {29, 19, 38},
+    /* 200 */ {192, 0, 255},
+    /* 201 */ {224, 128, 255},
+    /* 202 */ {125, 0, 166},
+    /* 203 */ {146, 83, 166},
+    /* 204 */ {96, 0, 128},
+    /* 205 */ {112, 64, 128},
+    /* 206 */ {58, 0, 77},
+    /* 207 */ {67, 38, 77},
+    /* 208 */ {29, 0, 38},
+    /* 209 */ {34, 19, 38},
+    /* 210 */ {255, 0, 255},
+    /* 211 */ {255, 128, 255},
+    /* 212 */ {166, 0, 166},
+    /* 213 */ {166, 83, 166},
+    /* 214 */ {128, 0, 128},
+    /* 215 */ {128, 64, 128},
+    /* 216 */ {77, 0, 77},
+    /* 217 */ {77, 38, 77},
+    /* 218 */ {38, 0, 38},
+    /* 219 */ {38, 19, 38},
+    /* 220 */ {255, 0, 192},
+    /* 221 */ {255, 128, 224},
+    /* 222 */ {166, 0, 125},
+    /* 223 */ {166, 83, 146},
+    /* 224 */ {128, 0, 96},
+    /* 225 */ {128, 64, 112},
+    /* 226 */ {77, 0, 58},
+    /* 227 */ {77, 38, 67},
+    /* 228 */ {38, 0, 29},
+    /* 229 */ {38, 19, 34},
+    /* 230 */ {255, 0, 128},
+    /* 231 */ {255, 128, 192},
+    /* 232 */ {166, 0, 83},
+    /* 233 */ {166, 83, 125},
+    /* 234 */ {128, 0, 64},
+    /* 235 */ {128, 64, 96},
+    /* 236 */ {77, 0, 38},
+    /* 237 */ {77, 38, 58},
+    /* 238 */ {38, 0, 19},
+    /* 239 */ {38, 19, 29},
+    /* 240 */ {255, 0, 64},
+    /* 241 */ {255, 128, 160},
+    /* 242 */ {166, 0, 42},
+    /* 243 */ {166, 83, 104},
+    /* 244 */ {128, 0, 32},
+    /* 245 */ {128, 64, 80},
+    /* 246 */ {77, 0, 19},
+    /* 247 */ {77, 38, 48},
+    /* 248 */ {38, 0, 10},
+    /* 249 */ {38, 19, 24},
+    /* 250 */ {84, 84, 84},
+    /* 251 */ {119, 119, 119},
+    /* 252 */ {153, 153, 153},
+    /* 253 */ {187, 187, 187},
+    /* 254 */ {222, 222, 222},
+    /* 255 */ {255, 255, 255}};
+
+/******************************************************************************
+ * Searches color by closest rgb values (distance of 2 3D points)
+ * not os specific.
+ * returns: index of color
+ */
+static int GetIndexByRGBValue(int red /*  */, int green /*  */, int blue /*  */)
+{
+  int savdis = 1, i;
+  double psav = 10000000, pnew, px, py, pz;
+  int nred, ngreen, nblue;
+
+  for (i = 0; i < MAX_COLORS; i++) {
+    nred = dxftable[i].red;
+    ngreen = dxftable[i].green;
+    nblue = dxftable[i].blue;
+    /* compute shortest distance between rgb colors */
+    px = red * red - 2 * nred * red + nred * nred;
+    py = green * green - 2 * ngreen * green + ngreen * ngreen;
+    pz = blue * blue - 2 * nblue * blue + nblue * nblue;
+    pnew = sqrt(px + py + pz);
+    if (pnew < psav) {
+      psav = pnew;
+      savdis = i;
+    }
+  }
+  return (savdis + 1);
+}
+
+/******************************************************************************
+ * computes the distance between p1 and p2
+ *
+ * returns:
+ */
+static double distpt2pt(xypnt p1 /*  */, xypnt p2 /*  */)
+{
+  double dx, dy;
+
+  dx = p2.xp - p1.xp;
+  dy = p2.yp - p1.yp;
+  if (p1.xp == p2.xp)
+    return (fabs(dy));
+  else if (p1.yp == p2.yp)
+    return (fabs(dx));
+  else
+    return (sqrt(dx * dx + dy * dy));
+}
+
+/******************************************************************************
+ * returns: length of all vectors in vertex list
+ */
+static double get_total_length(const xypnt *vtx, int vtx_count)
+{
+  double total_length = 0.0;
+
+  for (int i = 1; i < vtx_count; i++)
+    total_length += distpt2pt(vtx[i - 1], vtx[i]);
+  return total_length;
+}
+
+/******************************************************************************
+ * Convert B-Spline to list of lines.
+ *
+ * returns: the polyline vertices, as an array of xypnt
+ */
+static GArray *bspline_to_lines(const xypnt *vtx, int vtx_count, int spline_order,
+                                int spline_resolution)
+{
+  GArray *lines = g_array_new(FALSE, FALSE, sizeof(xypnt));
+  int i, j, knot_index, number_of_segments;
+  int n = vtx_count + spline_order + 1;
+  int m = spline_order + 1;
+  int nweights = n * m;
+  g_autofree int *knot = g_new0(int, n);
+  g_autofree double *weight = g_new(double, nweights);
+  double spline_step, total_length, t, spline_pnt_x, spline_pnt_y, r;
+  xypnt spline_pnt;
+
+  for (i = 0; i < vtx_count + spline_order; i++)
+    knot[i] = (i < spline_order) ? 0 : (i > vtx_count) ? knot[i - 1] : knot[i - 1] + 1;
+  total_length = get_total_length(vtx, vtx_count);
+  r = (spline_resolution == 0) ? sqrt(total_length) : total_length / spline_resolution;
+  number_of_segments = lround(r);
+  spline_step = ((double)knot[vtx_count + spline_order - 1]) / number_of_segments;
+  for (knot_index = spline_order - 1; knot_index < vtx_count; knot_index++) {
+    for (i = 0; i <= vtx_count + spline_order - 2; i++)
+      weight[i] = (i == knot_index && knot[i] != knot[i + 1]);
+    t = knot[knot_index];
+    while (t < knot[knot_index + 1] - spline_step / 2.0) {
+      spline_pnt_x = 0.0;
+      spline_pnt_y = 0.0;
+      for (j = 2; j <= spline_order; j++) {
+        for (i = 0; i < vtx_count; i++) {
+          weight[(j - 1) * n + i] = 0;
+          if (weight[(j - 2) * n + i])
+            weight[(j - 1) * n + i] +=
+                (t - knot[i]) * weight[(j - 2) * n + i] / (knot[i + j - 1] - knot[i]);
+          if (weight[(j - 2) * n + i + 1])
+            weight[(j - 1) * n + i] +=
+                (knot[i + j] - t) * weight[(j - 2) * n + i + 1] / (knot[i + j] - knot[i + 1]);
+          if (j == spline_order) {
+            spline_pnt_x += vtx[i].xp * weight[(j - 1) * n + i];
+            spline_pnt_y += vtx[i].yp * weight[(j - 1) * n + i];
+          }
+        }
+        weight[(j - 1) * n + vtx_count] = 0;
+      }
+      spline_pnt.xp = lround(spline_pnt_x);
+      spline_pnt.yp = lround(spline_pnt_y);
+      g_array_append_val(lines, spline_pnt);
+      t += spline_step;
+    }
+  }
+  g_array_append_val(lines, vtx[vtx_count - 1]);
+
+  return lines;
+}
+
+/******************************************************************************
+ * This function outputs the DXF code which produces the polylines
+ */
+static void out_splines(FILE *dxf_file, spline_list_array_type shape)
+{
+  unsigned this_list;
+  double startx, starty;
+  xypnt pnt, pnt_old = {0, 0};
+  char new_layer = 0, layerstr[10] = "C1";
+  int first_seg = 1, idx;
+  at_color last_color = {0, 0, 0};
+
+  for (this_list = 0; this_list < SPLINE_LIST_ARRAY_LENGTH(shape); this_list++) {
+    unsigned this_spline;
+
+    spline_list_type list = SPLINE_LIST_ARRAY_ELT(shape, this_list);
+    spline_type first = SPLINE_LIST_ELT(list, 0);
+    at_color curr_color =
+        (list.clockwise && shape.background_color != NULL) ? *(shape.background_color) : list.color;
+
+    if (this_list == 0 || !at_color_equal(&curr_color, &last_color)) {
+      idx = GetIndexByRGBValue(curr_color.r, curr_color.g, curr_color.b);
+      g_snprintf(layerstr, sizeof(layerstr), "C%d", idx);
+      new_layer = 1;
+      last_color = curr_color;
+    }
+    startx = START_POINT(first).x;
+    starty = START_POINT(first).y;
+    if (!first_seg) {
+      if (lround(startx * RESOLUTION) != pnt_old.xp || lround(starty * RESOLUTION) != pnt_old.yp ||
+          new_layer) {
+        /* must begin new polyline */
+        new_layer = 0;
+        fprintf(dxf_file, "  0\nSEQEND\n  8\n%s\n", layerstr);
+        fprintf(dxf_file, "  0\nPOLYLINE\n  8\n%s\n  66\n1\n  10\n%f\n  20\n%f\n", layerstr, startx,
+                starty);
+        fprintf(dxf_file, "  0\nVERTEX\n  8\n%s\n  10\n%f\n  20\n%f\n", layerstr, startx, starty);
+        pnt_old.xp = lround(startx * RESOLUTION);
+        pnt_old.yp = lround(starty * RESOLUTION);
+      }
+    } else {
+      fprintf(dxf_file, "  0\nPOLYLINE\n  8\n%s\n  66\n1\n  10\n%f\n  20\n%f\n", layerstr, startx,
+              starty);
+      fprintf(dxf_file, "  0\nVERTEX\n  8\n%s\n  10\n%f\n  20\n%f\n", layerstr, startx, starty);
+      pnt_old.xp = lround(startx * RESOLUTION);
+      pnt_old.yp = lround(starty * RESOLUTION);
+    }
+    for (this_spline = 0; this_spline < SPLINE_LIST_LENGTH(list); this_spline++) {
+      spline_type s = SPLINE_LIST_ELT(list, this_spline);
+
+      if (SPLINE_DEGREE(s) == LINEARTYPE) {
+
+        if (lround(startx * RESOLUTION) != pnt_old.xp ||
+            lround(starty * RESOLUTION) != pnt_old.yp || new_layer) {
+          /* must begin new polyline */
+          new_layer = 0;
+          fprintf(dxf_file, "  0\nSEQEND\n  8\n%s\n", layerstr);
+          fprintf(dxf_file, "  0\nPOLYLINE\n  8\n%s\n  66\n1\n  10\n%f\n  20\n%f\n", layerstr,
+                  startx, starty);
+          fprintf(dxf_file, "  0\nVERTEX\n  8\n%s\n  10\n%f\n  20\n%f\n", layerstr, startx, starty);
+        }
+        fprintf(dxf_file, "  0\nVERTEX\n  8\n%s\n  10\n%f\n  20\n%f\n", layerstr, END_POINT(s).x,
+                END_POINT(s).y);
+
+        startx = END_POINT(s).x;
+        starty = END_POINT(s).y;
+        pnt_old.xp = lround(startx * RESOLUTION);
+        pnt_old.yp = lround(starty * RESOLUTION);
+      } else {
+        const xypnt vec[4] = {
+            {lround(startx * RESOLUTION), lround(starty * RESOLUTION)},
+            {lround(CONTROL1(s).x * RESOLUTION), lround(CONTROL1(s).y * RESOLUTION)},
+            {lround(CONTROL2(s).x * RESOLUTION), lround(CONTROL2(s).y * RESOLUTION)},
+            {lround(END_POINT(s).x * RESOLUTION), lround(END_POINT(s).y * RESOLUTION)}};
+
+        /* Note that spline order can be max. 4 since we have only 4 spline control points */
+        g_autoptr(GArray) res = bspline_to_lines(vec, G_N_ELEMENTS(vec), 4, 10000);
+
+        pnt = g_array_index(res, xypnt, 0);
+
+        if (pnt.xp != pnt_old.xp || pnt.yp != pnt_old.yp || new_layer) {
+          /* must begin new polyline */
+          new_layer = 0;
+          fprintf(dxf_file, "  0\nSEQEND\n  8\n%s\n", layerstr);
+          fprintf(dxf_file, "  0\nPOLYLINE\n  8\n%s\n  66\n1\n  10\n%f\n  20\n%f\n", layerstr,
+                  (double)pnt.xp / RESOLUTION, (double)pnt.yp / RESOLUTION);
+          fprintf(dxf_file, "  0\nVERTEX\n  8\n%s\n  10\n%f\n  20\n%f\n", layerstr,
+                  (double)pnt.xp / RESOLUTION, (double)pnt.yp / RESOLUTION);
+        }
+        for (guint i = 1; i < res->len; i++) {
+          pnt = g_array_index(res, xypnt, i);
+          fprintf(dxf_file, "  0\nVERTEX\n  8\n%s\n  10\n%f\n  20\n%f\n", layerstr,
+                  (double)pnt.xp / RESOLUTION, (double)pnt.yp / RESOLUTION);
+        }
+
+        pnt_old = pnt;
+
+        startx = END_POINT(s).x;
+        starty = END_POINT(s).y;
+      }
+    }
+    first_seg = 0;
+  }
+
+  fprintf(dxf_file, "  0\nSEQEND\n  8\n0\n");
+}
+
+/******************************************************************************
+ * This function outputs a complete layer table for all 255 colors.
+ */
+static void output_layer(FILE *dxf_file, spline_list_array_type shape)
+{
+  int i, idx;
+  char layerlist[256];
+  unsigned this_list;
+  at_color last_color = {0, 0, 0};
+
+  memset(layerlist, 0, sizeof(layerlist));
+  for (this_list = 0; this_list < SPLINE_LIST_ARRAY_LENGTH(shape); this_list++) {
+    spline_list_type list = SPLINE_LIST_ARRAY_ELT(shape, this_list);
+    at_color curr_color =
+        (list.clockwise && shape.background_color != NULL) ? *(shape.background_color) : list.color;
+
+    if (this_list == 0 || !at_color_equal(&curr_color, &last_color)) {
+      idx = GetIndexByRGBValue(curr_color.r, curr_color.g, curr_color.b);
+      layerlist[idx - 1] = 1;
+      last_color = curr_color;
+    }
+  }
+
+  OUT_LINE("  0");
+  OUT_LINE("SECTION");
+  OUT_LINE("  2");
+  OUT_LINE("TABLES");
+  OUT_LINE("  0");
+  OUT_LINE("TABLE");
+  OUT_LINE("  2");
+  OUT_LINE("LAYER");
+  OUT_LINE("  70");
+  OUT_LINE("     2048");
+
+  OUT_LINE("  0");
+  OUT_LINE("LAYER");
+  OUT_LINE("  2");
+  OUT_LINE("0");
+  OUT_LINE("  70");
+  OUT_LINE("    0");
+  OUT_LINE("  62");
+  OUT_LINE("     7");
+  OUT_LINE("  6");
+  OUT_LINE("CONTINUOUS");
+
+  for (i = 1; i < 256; i++) {
+    if (layerlist[i - 1]) {
+      OUT_LINE("  0");
+      OUT_LINE("LAYER");
+      OUT_LINE("   2");
+      OUT("C%d\n", i);
+      OUT_LINE("  70");
+      OUT_LINE("     64");
+      OUT_LINE("  62");
+      OUT("%d\n", i);
+      OUT_LINE("  6");
+      OUT_LINE("CONTINUOUS");
+    }
+  }
+
+  OUT_LINE("  0");
+  OUT_LINE("ENDTAB");
+  OUT_LINE("  0");
+  OUT_LINE("ENDSEC");
+}
+
+/******************************************************************************
+ * DXF output function.
+ */
+int output_dxf12_writer(FILE *dxf_file, gchar *name, int llx, int lly, int urx, int ury,
+                        at_output_opts_type *opts, spline_list_array_type shape,
+                        at_msg_func msg_func, gpointer msg_data, gpointer user_data)
+{
+  OUT_LINE("  0");
+  OUT_LINE("SECTION");
+  OUT_LINE("  2");
+  OUT_LINE("HEADER");
+  OUT_LINE("  9");
+  OUT_LINE("$ACADVER");
+  OUT_LINE("  1");
+  OUT_LINE("AC1009");
+  OUT_LINE("  9");
+  OUT_LINE("$EXTMIN");
+  OUT_LINE("  10");
+  OUT(" %f\n", (double)llx);
+  OUT_LINE("  20");
+  OUT(" %f\n", (double)lly);
+  OUT_LINE("  30");
+  OUT_LINE(" 0.000000");
+  OUT_LINE("  9");
+  OUT_LINE("$EXTMAX");
+  OUT_LINE("  10");
+  OUT(" %f\n", (double)urx);
+  OUT_LINE("  20");
+  OUT(" %f\n", (double)ury);
+  OUT_LINE("  30");
+  OUT_LINE(" 0.000000");
+  OUT_LINE("  0");
+  OUT_LINE("ENDSEC");
+
+  output_layer(dxf_file, shape);
+
+  OUT_LINE("  0");
+  OUT_LINE("SECTION");
+  OUT_LINE("  2");
+  OUT_LINE("ENTITIES");
+
+  out_splines(dxf_file, shape);
+
+  OUT_LINE("  0");
+  OUT_LINE("ENDSEC");
+  OUT_LINE("  0");
+  OUT_LINE("EOF");
+  return 0;
+}

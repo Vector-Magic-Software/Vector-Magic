@@ -1,0 +1,167 @@
+# SPDX-FileCopyrightText: © 2000 Enrico Persiani
+# SPDX-FileCopyrightText: © 2000 Johannes.Schindelin
+# SPDX-FileCopyrightText: © 2000 MenTaLguY
+# SPDX-FileCopyrightText: © 2000 Peter Cucka
+# SPDX-FileCopyrightText: © 2000-2002 Martin Weber
+# SPDX-FileCopyrightText: © 2000-2004 Masatake YAMATO
+# SPDX-FileCopyrightText: © 2001 David A. Bartold
+# SPDX-FileCopyrightText: © 2001 Kevin O' Gorman
+# SPDX-FileCopyrightText: © 2001 Per Grahn
+# SPDX-FileCopyrightText: © 2001 Steffen Politzky
+# SPDX-FileCopyrightText: © 2002 R. P. C. Rodgers
+# SPDX-FileCopyrightText: © 2005 Robin Adams
+# SPDX-FileCopyrightText: © 2014 Khaled Hosny
+# SPDX-FileCopyrightText: © 2017-2025 Peter Lemenkov
+# SPDX-FileCopyrightText: © 2020 Sacha Chua
+# SPDX-FileCopyrightText: © 2024 Ryan Carsten Schmidt
+#
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
+SUBDIRS = po
+man_MANS = autotrace.1
+EXTRA_DIST=$(man_MANS) \
+	   tests \
+	   INSTALL_OSX.md \
+	   README.md \
+	   TODO \
+	   autotrace.pc.in \
+	   distribute \
+	   doc/despeckle.txt \
+	   src/input-magick.c \
+	   src/input-magick.h \
+	   src/input-png.c \
+	   src/input-png.h \
+	   src/output-pstoedit.c \
+	   src/output-pstoedit.h
+
+AUTOMAKE_OPTIONS = foreign
+
+autotraceincludedir=$(includedir)/autotrace
+lib_LTLIBRARIES=libautotrace.la
+bin_PROGRAMS=autotrace
+
+if HAVE_MAGICK
+input_magick_src=src/input-magick.h src/input-magick.c
+else
+input_magick_src=
+endif
+
+if HAVE_LIBPNG
+input_png_src=src/input-png.c src/input-png.h
+else
+input_png_src=
+endif
+
+if HAVE_MAGICK_READERS
+input_native_src=
+else
+input_native_src=src/input-bmp.c src/input-bmp.h \
+		   src/input-pnm.c src/input-pnm.h \
+		   src/input-tga.c src/input-tga.h
+endif
+
+input_src=src/input-gf.c src/input-gf.h src/glyph-metrics.h \
+	  $(input_magick_src) \
+	  $(input_native_src) \
+	  $(input_png_src)
+
+if HAVE_LIBPSTOEDIT
+output_pstoedit_src=src/output-pstoedit.h src/output-pstoedit.c
+else
+output_pstoedit_src=
+endif
+output_src=src/output-eps.c src/output-eps.h \
+	   src/output-er.c src/output-er.h \
+	   src/output-fig.c src/output-fig.h \
+	   src/output-sk.c src/output-sk.h \
+	   src/output-svg.c src/output-svg.h \
+	   src/output-ugs.c src/output-ugs.h \
+	   src/output-p2e.c src/output-p2e.h \
+	   src/output-emf.c src/output-emf.h \
+	   src/output-dxf.c src/output-dxf.h \
+	   src/output-epd.c src/output-epd.h \
+	   src/output-pdf.c src/output-pdf.h \
+	   src/output-mif.c src/output-mif.h \
+	   src/output-cgm.c src/output-cgm.h \
+	   src/output-dr2d.c src/output-dr2d.h \
+	   src/output-pov.c src/output-pov.h \
+	   src/output-plt.c src/output-plt.h \
+	   src/output-ild.c src/output-ild.h \
+	   $(output_pstoedit_src)
+
+libautotrace_la_SOURCES =\
+                $(input_src) $(output_src) \
+		src/fit.c \
+		src/spline.c \
+		src/curve.c \
+		src/vector.c \
+		src/color.c \
+		src/autotrace.c \
+		src/output.c \
+		src/input.c \
+		src/pxl-outline.c \
+		src/median.c \
+		src/thin-image.c \
+		src/logreport.c \
+		src/filename.c \
+		src/epsilon-equal.h \
+		src/thin-image.h \
+		src/quantize.h \
+		src/image-header.h \
+		src/fit.h \
+		src/curve.h \
+		src/vector.h \
+		src/pxl-outline.h \
+		src/despeckle.c \
+		src/despeckle.h \
+		src/exception.c \
+		src/image-proc.c \
+		src/image-proc.h \
+		src/module.c \
+		src/private.h \
+		src/intl.h
+
+autotraceinclude_HEADERS=\
+		src/types.h \
+		src/autotrace.h \
+		src/input.h \
+		src/output.h \
+		src/spline.h \
+		src/exception.h \
+		src/color.h
+
+libautotrace_la_LDFLAGS = -version-info $(LT_CURRENT):$(LT_REVISION):$(LT_AGE)
+
+#
+# noinst_HEADERS: headers shared between lib and bin.
+# File not installed and not shared should be in
+# libautotrace_a_SOURCES.
+noinst_HEADERS = src/byteorder.h                    \
+		src/filename.h                      \
+		src/logreport.h
+
+autotrace_SOURCES=\
+		src/atou.c				\
+		src/atou.h				\
+		src/main.c
+
+AM_CPPFLAGS = -DG_LOG_DOMAIN=\"autotrace\" $(GRAPHICSMAGICK_CFLAGS) $(IMAGEMAGICK_CFLAGS) $(LIBPNG_CFLAGS) $(LIBPSTOEDIT_CFLAGS) $(GLIB2_CFLAGS) -DLOCALEDIR=\""$(datadir)/locale"\"
+
+autotrace_LDADD =				\
+		libautotrace.la			\
+		$(GRAPHICSMAGICK_LIBS)		\
+		$(IMAGEMAGICK_LIBS)		\
+		$(LIBPNG_LIBS)		\
+		$(LIBPSTOEDIT_LIBS)		\
+		$(GLIB2_LIBS)			\
+		$(POPT_LIBS)			\
+		$(INTLLIBS)			\
+		-lm
+
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA= autotrace.pc
+
+ACLOCAL_AMFLAGS = -I m4
+
+check-local:
+	AUTOTRACE="$(abs_builddir)/$(bin_PROGRAMS)" $(srcdir)/tests/runtests.sh

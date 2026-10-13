@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: © 2024-2025 Peter Lemenkov
+# SPDX-FileCopyrightText: © 2025 dependabot[bot]
+#
+# SPDX-License-Identifier: CC0-1.0
+
+name: Building installer for Windows
+
+# The installers are built for every push to master and every tag; pull
+# requests are covered by the Windows build-and-test workflow instead.
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'           # Push events to every tag not containing /
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build_windows_installer:
+    runs-on: ubuntu-latest
+    container: fedora:43
+    strategy:
+      matrix:
+        arch: ['32', '64']
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies for Win${{ matrix.arch }}
+        run: |
+            sudo dnf update -y
+            # FIXME mingw64-nsis is broken in Fedora 43 at least, so we install mingw32-nsis for both architectures
+            sudo dnf install -y autoconf automake gettext-devel glib2-devel libtool make \
+                                mingw${{ matrix.arch }}-filesystem mingw${{ matrix.arch }}-glib2 mingw${{ matrix.arch }}-libpng \
+                                mingw${{ matrix.arch }}-gcc mingw32-nsis pkgconf-pkg-config which
+            mkdir -p distribute/win/3rdparty
+
+      - name: Regenerate ./configure script
+        run: ./autogen.sh
+
+      - name: Cross-compile and build installer for Win${{ matrix.arch }}
+        run: |
+            mingw${{ matrix.arch }}-configure --without-magick --without-pstoedit
+            make
+
+            # Set DLL path
+            DLLPATH="/usr/$( [[ "${{ matrix.arch }}" == "32" ]] && echo "i686" || echo "x86_64" )-w64-mingw32/sys-root/mingw/bin"
+
+            # Set version: use tag if available, otherwise use date
+            if [[ "${{ github.ref_type }}" == "tag" ]]; then
+              VERSION="${{ github.ref_name }}"  # Just the tag: 0.40.1
+            else
+              VERSION="$(date +%Y%m%d)"         # Just the date: 20251112
+            fi
+
+            makensis -DVERSION="$VERSION" -DFLAVOUR=win${{ matrix.arch }} -DDLLPATH="$DLLPATH" distribute/win/autotrace.nsi
+
+      - uses: svenstaro/upload-release-action@v2
+        if: github.ref_type == 'tag'
+        with:
+          file_glob: true
+          file: distribute/win/autotrace-*-setup.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: win${{ matrix.arch }}-installer
+          path: distribute/win/autotrace-*-win${{ matrix.arch }}-setup.exe
+

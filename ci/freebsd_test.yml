@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: © 2025 Peter Lemenkov
+#
+# SPDX-License-Identifier: CC0-1.0
+
+name: Testing on FreeBSD
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/*.c'
+      - 'src/*.h'
+      - 'configure.ac'
+      - 'Makefile.am'
+      - '**/Makefile.am'
+      - 'autogen.sh'
+      - 'tests/**'
+  pull_request:
+    paths:
+      # Source code
+      - 'src/*.c'
+      - 'src/*.h'
+      # Build system
+      - 'configure.ac'
+      - 'Makefile.am'
+      - '**/Makefile.am'
+      - 'autogen.sh'
+      - 'tests/**'
+      # Dependencies
+      - '.github/workflows/freebsd_test.yml'  # Re-run if workflow changes
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  test_on_freebsd:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        freebsd-version: ['15.1']
+    name: A job to run test in FreeBSD ${{ matrix.freebsd-version }}
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v7
+      # Runs a single command using the runners shell
+      - name: build and run tests packages on FreeBSD ${{ matrix.freebsd-version }}
+        uses: vmactions/freebsd-vm@v1
+        with:
+            release: ${{ matrix.freebsd-version }}
+            prepare: |
+                pkg update -f
+                pkg upgrade -y
+                pkg install -y gmake autoconf automake libtool pkgconf perl5 git
+                pkg install -y ImageMagick7 pstoedit png gettext-tools glib
+            run: |
+                ./autogen.sh
+                ./configure
+                gmake
+                gmake check
